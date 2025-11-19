@@ -1,92 +1,218 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { GomokuGame, Player, GameStatus } from '@gomoku-monorepo/core-gomoku'
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { GomokuGame, Player, GameStatus } from '@gomoku-monorepo/core-gomoku';
+import type { BoardState, WinningLine } from '@gomoku-monorepo/core-gomoku';
 
-const game = ref(new GomokuGame())
-const boardState = ref(game.value.getBoardState())
-const currentPlayer = ref(game.value.getCurrentPlayer())
-const gameStatus = ref(game.value.getGameStatus())
-const lastMove = ref(game.value.getLastMove())
+const game = ref(new GomokuGame({ timePerMove: 30 }));
+const board = ref<BoardState>(game.value.getBoardState());
+const currentPlayer = ref<Player>(game.value.getCurrentPlayer());
+const gameStatus = ref<GameStatus>(game.value.getGameStatus());
+const lastMove = ref<{ row: number; col: number } | null>(game.value.getLastMove());
+const winningLine = ref<WinningLine | undefined>(undefined);
+const moveTime = ref(0);
+const timerInterval = ref<number | null>(null);
 
-const currentPlayerText = computed(() => {
-  if (gameStatus.value !== GameStatus.PLAYING) {
-    return gameStatus.value === GameStatus.BLACK_WIN ? '🎉 黑子获胜!' :
-           gameStatus.value === GameStatus.WHITE_WIN ? '🎉 白子获胜!' :
-           '🤝 平局!'
+// 音效上下文
+const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+// 播放音效
+const playSound = (type: 'move' | 'win' | 'start') => {
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
   }
-  return currentPlayer.value === Player.BLACK ? '⚫ 黑子回合' : '⚪ 白子回合'
-})
+  const oscillator = audioCtx.createOscillator();
+  const gainNode = audioCtx.createGain();
+  
+  oscillator.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+  
+  if (type === 'move') {
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(400, audioCtx.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.1);
+    gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 0.1);
+  } else if (type === 'win') {
+    oscillator.type = 'triangle';
+    oscillator.frequency.setValueAtTime(400, audioCtx.currentTime);
+    oscillator.frequency.linearRampToValueAtTime(600, audioCtx.currentTime + 0.1);
+    oscillator.frequency.linearRampToValueAtTime(800, audioCtx.currentTime + 0.2);
+    gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 0.5);
+  } else if (type === 'start') {
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(300, audioCtx.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.2);
+    gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 0.2);
+  }
+};
+
+const startTimer = () => {
+  if (timerInterval.value) clearInterval(timerInterval.value);
+  moveTime.value = 0;
+  timerInterval.value = window.setInterval(() => {
+    moveTime.value = Math.floor(game.value.getCurrentMoveTime() / 1000);
+  }, 100);
+};
+
+const stopTimer = () => {
+  if (timerInterval.value) {
+    clearInterval(timerInterval.value);
+    timerInterval.value = null;
+  }
+};
+
+const updateGameState = () => {
+  board.value = game.value.getBoardState();
+  currentPlayer.value = game.value.getCurrentPlayer();
+  gameStatus.value = game.value.getGameStatus();
+  lastMove.value = game.value.getLastMove();
+  winningLine.value = game.value.getWinningLine();
+};
 
 const handleCellClick = (row: number, col: number) => {
-  const result = game.value.makeMove(row, col)
-  
+  if (gameStatus.value !== GameStatus.PLAYING) return;
+
+  const result = game.value.makeMove(row, col);
   if (result.success) {
-    boardState.value = game.value.getBoardState()
-    currentPlayer.value = game.value.getCurrentPlayer()
-    gameStatus.value = game.value.getGameStatus()
-    lastMove.value = game.value.getLastMove()
+    playSound('move');
+    updateGameState();
+    
+    if (result.gameStatus !== GameStatus.PLAYING) {
+      stopTimer();
+      if (result.winner) {
+        playSound('win');
+      }
+    } else {
+      startTimer(); // 重置计时
+    }
   }
-}
+};
 
 const resetGame = () => {
-  game.value.reset()
-  boardState.value = game.value.getBoardState()
-  currentPlayer.value = game.value.getCurrentPlayer()
-  gameStatus.value = game.value.getGameStatus()
-  lastMove.value = game.value.getLastMove()
-}
+  game.value.reset();
+  updateGameState();
+  playSound('start');
+  startTimer();
+};
 
-const getCellClass = (row: number, col: number) => {
-  const isLastMove = lastMove.value?.row === row && lastMove.value?.col === col
-  return {
-    'last-move': isLastMove
+const undoMove = () => {
+  if (game.value.undo()) {
+    updateGameState();
+    startTimer(); // 重置计时
   }
-}
+};
+
+const statusMessage = computed(() => {
+  switch (gameStatus.value) {
+    case GameStatus.PLAYING:
+      return `当前回合: ${currentPlayer.value === Player.BLACK ? '黑子' : '白子'}`;
+    case GameStatus.BLACK_WIN:
+      return '🎉 黑子获胜！';
+    case GameStatus.WHITE_WIN:
+      return '🎉 白子获胜！';
+    case GameStatus.DRAW:
+      return '🤝 平局！';
+    default:
+      return '';
+  }
+});
+
+const formatTime = (seconds: number) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
+
+const isWinningCell = (row: number, col: number) => {
+  if (!winningLine.value) return false;
+  return winningLine.value.positions.some(p => p.row === row && p.col === col);
+};
+
+onMounted(() => {
+  startTimer();
+});
+
+onUnmounted(() => {
+  stopTimer();
+});
 </script>
 
 <template>
-  <div class="gomoku-container">
-    <header class="header">
-      <h1 class="title">
-        <span class="framework-badge vue">Vue</span>
-        五子棋游戏
-      </h1>
-      <p class="subtitle">Framework: Vue 3 + TypeScript + Vite</p>
-    </header>
-
-    <div class="game-info">
-      <div class="status-display">
-        {{ currentPlayerText }}
-      </div>
-      <button class="reset-btn" @click="resetGame">
-        🔄 重新开始
-      </button>
-    </div>
-
-    <div class="board-container">
-      <div class="board">
-        <div
-          v-for="(row, rowIndex) in boardState"
-          :key="rowIndex"
-          class="board-row"
-        >
-          <div
-            v-for="(cell, colIndex) in row"
-            :key="colIndex"
-            class="board-cell"
-            :class="getCellClass(rowIndex, colIndex)"
-            @click="handleCellClick(rowIndex, colIndex)"
-          >
-            <div v-if="cell === Player.BLACK" class="piece black"></div>
-            <div v-else-if="cell === Player.WHITE" class="piece white"></div>
+  <div class="game-container">
+    <div class="glass-panel">
+      <header class="header">
+        <h1>五子棋 (Vue 3)</h1>
+        <div class="status-bar">
+          <div class="status" :class="{ 
+            'black-turn': currentPlayer === Player.BLACK && gameStatus === GameStatus.PLAYING,
+            'white-turn': currentPlayer === Player.WHITE && gameStatus === GameStatus.PLAYING,
+            'winner': gameStatus !== GameStatus.PLAYING
+          }">
+            {{ statusMessage }}
+          </div>
+          <div class="timer">
+            ⏱️ {{ formatTime(moveTime) }}
           </div>
         </div>
+      </header>
+
+      <div class="board-wrapper">
+        <div class="board">
+          <!-- 网格线 -->
+          <div class="grid-lines">
+            <div v-for="i in 15" :key="`h-${i}`" class="line horizontal" :style="{ top: `${(i-1) * 100 / 14}%` }"></div>
+            <div v-for="i in 15" :key="`v-${i}`" class="line vertical" :style="{ left: `${(i-1) * 100 / 14}%` }"></div>
+          </div>
+
+          <!-- 棋子区域 -->
+          <div class="cells">
+            <div v-for="(row, rIndex) in board" :key="rIndex" class="row">
+              <div 
+                v-for="(cell, cIndex) in row" 
+                :key="cIndex" 
+                class="cell"
+                @click="handleCellClick(rIndex, cIndex)"
+              >
+                <div 
+                  class="piece" 
+                  :class="{ 
+                    'black': cell === Player.BLACK, 
+                    'white': cell === Player.WHITE,
+                    'last-move': lastMove?.row === rIndex && lastMove?.col === cIndex,
+                    'winning': isWinningCell(rIndex, cIndex)
+                  }"
+                  v-if="cell !== Player.NONE"
+                ></div>
+                <div class="preview-piece" :class="{
+                  'black': currentPlayer === Player.BLACK,
+                  'white': currentPlayer === Player.WHITE
+                }" v-if="cell === Player.NONE && gameStatus === GameStatus.PLAYING"></div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 胜利线动画 -->
+          <div v-if="winningLine" class="winning-line-overlay"></div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="btn secondary" @click="undoMove" :disabled="gameStatus !== GameStatus.PLAYING">
+          ↩️ 悔棋
+        </button>
+        <button class="btn primary" @click="resetGame">
+          🔄 重新开始
+        </button>
       </div>
     </div>
-
-    <footer class="footer">
-      <p>Built with ❤️ using Mono Repo Architecture</p>
-    </footer>
   </div>
 </template>
 
