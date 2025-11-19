@@ -1,0 +1,34 @@
+<div class="gomoku-container">
+    <header class="header">
+        <h1 class="title">
+            <span class="framework-badge angular">Angular</span>
+            五子棋游戏
+        </h1>
+        <p class="subtitle">Framework: Angular 19 + TypeScript</p>
+    </header>
+
+    <div class="game-info">
+        <div class="status-display">
+            {{ currentPlayerText }}
+        </div>
+        <button class="reset-btn" (click)="resetGame()">
+            🔄 重新开始
+        </button>
+    </div>
+
+    <div class="board-container">
+        <div class="board">
+            <div *ngFor="let row of boardState; let rowIndex = index" class="board-row">
+                <div *ngFor="let cell of row; let colIndex = index" class="board-cell"
+                    [class.last-move]="isLastMove(rowIndex, colIndex)" (click)="handleCellClick(rowIndex, colIndex)">
+                    <div *ngIf="cell === Player.BLACK" class="piece black"></div>
+                    <div *ngIf="cell === Player.WHITE" class="piece white"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <p>Built with ❤️ using Mono Repo Architecture</p>
+    </footer>
+</div>

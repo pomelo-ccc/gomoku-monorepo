@@ -1,0 +1,28 @@
+{
+  "name": "gomoku-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cross-framework Gomoku game built with Mono Repo architecture",
+  "scripts": {
+    "dev": "pnpm --filter \"./packages/client-*\" --parallel dev",
+    "dev:vue": "pnpm --filter client-vue dev",
+    "dev:react": "pnpm --filter client-react dev",
+    "dev:angular": "pnpm --filter client-angular dev",
+    "build:core": "pnpm --filter core-gomoku build",
+    "build:all": "pnpm --filter core-gomoku build && pnpm --filter \"./packages/client-*\" --parallel build",
+    "install:all": "pnpm install"
+  },
+  "keywords": [
+    "gomoku",
+    "monorepo",
+    "vue",
+    "react",
+    "angular",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
